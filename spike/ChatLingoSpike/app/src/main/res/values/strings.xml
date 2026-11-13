@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChatLingo Spike</string>
+    <string name="a11y_label">ChatLingo Spike (diagnostika)</string>
+    <string name="a11y_description">Diagnostická služba pro technický test ChatLingo. Čte pouze strukturu okna WhatsAppu (prvky, jejich polohu a text zpráv), kreslí kolem rozpoznaných zpráv barevné rámečky a na tvůj pokyn uloží strukturu do souboru ve složce Stažené soubory. Nic neodesílá na internet a nikdy neodešle zprávu.</string>
+</resources>

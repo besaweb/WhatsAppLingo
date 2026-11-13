@@ -1,0 +1,27 @@
+name: spike-apk
+
+on:
+  push:
+    paths:
+      - "spike/**"
+      - ".github/workflows/spike-apk.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spike/ChatLingoSpike
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatlingo-spike-debug
+          path: spike/ChatLingoSpike/app/build/outputs/apk/debug/*.apk
