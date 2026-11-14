@@ -58,16 +58,16 @@ object WhatsAppParser {
     private val OUT_MARKER_IDS = setOf("status")
 
     /** Skupinový chat: jméno odesílatele / kolečko s iniciálou se zobrazují jen u příchozích zpráv. */
-    private val IN_CUE_IDS = setOf("name_in_group", "name_in_group_tv", "group_profile_initials")
+    private val IN_CUE_IDS = setOf("name_in_group", "name_in_group_tv", "group_profile_initials", "group_profile_pic")
 
     /** Podstromy, které nenesou text zprávy ani značku; nevstupujeme do nich kvůli rychlosti. */
     private val SKIP_SUBTREE_IDS = setOf(
-        "web_page_preview_holder", "link_preview_frame", "reactions_bubble_layout",
-        "media_container_wrapper", "action_button",
+        "reactions_bubble_layout", "media_container_wrapper", "action_button",
     )
     private val ENTRY_IDS = listOf("entry")
     private val META_IDS = setOf(
-        "date", "status", "name_in_group", "forwarded", "edited",
+        "date", "status", "name_in_group", "name_in_group_tv", "secondary_name_in_group_tv",
+        "forwarded", "edited", "url",
         "conversation_row_date_divider", "unread_divider_tv",
     )
 
@@ -248,12 +248,15 @@ object WhatsAppParser {
             steps++
         }
 
+        // Odchozí bubliny jsou přilepené k pravému okraji (~3 % šířky). Příchozí začínají vlevo
+        // (1:1 ~3 %, skupina ~13 % kvůli avatarům) a vpravo nechávají víc místa než odchozí.
+        val w = viewport.width().toFloat()
         val leftGap = bubble.left - viewport.left
         val rightGap = viewport.right - bubble.right
         val byPosition = when {
-            abs(leftGap - rightGap) < viewport.width() * 0.08f -> Direction.UNKNOWN
-            leftGap < rightGap -> Direction.IN
-            else -> Direction.OUT
+            rightGap <= w * 0.07f -> Direction.OUT
+            leftGap <= w * 0.20f -> Direction.IN
+            else -> Direction.UNKNOWN
         }
         return RawItem(
             text = textNode.text.toString(),
