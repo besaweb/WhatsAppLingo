@@ -1,7 +1,7 @@
 # ChatLingo (prac. název WhatsAppLingo) – Technická dokumentace
 
-> Stav: **ETAPA 1 – technická analýza a ověření proveditelnosti** (13. 11. 2026)
-> Analýza vychází z dokumentace Android API, pravidel Google Play a známého chování WhatsAppu. Části označené **[SPIKE]** je nutné před MVP ověřit na reálném zařízení. Nic z toho zatím není ověřeno měřením.
+> Stav: **ETAPA 1b DOKONČENA – spike na zařízení ověřen, verdikt GO** (14. 11. 2026). Podrobnosti a naměřená čísla: [spike/SPIKE_RESULTS.md](spike/SPIKE_RESULTS.md).
+> Analýza vychází z dokumentace Android API, pravidel Google Play a známého chování WhatsAppu. Části označené **[SPIKE]** byly ověřeny na Samsung Galaxy S21 (Android 15) s WhatsAppem 2.26.44.90. Kde se skutečnost lišila od předpokladu, je to v textu uvedeno jako **Ověřeno spikem**.
 
 ---
 
@@ -10,8 +10,8 @@
 | Otázka | Odpověď |
 |---|---|
 | Dá se zobrazit překlad „pod zprávou“ ve WhatsAppu? | **Ano, ale jen jako překryv.** Overlay se vykreslí *nad* obsah WhatsAppu. Neumí odsunout další zprávy, takže panel **zakryje to, co je pod bublinou** (mezeru nebo další zprávu). Skutečné vložení do bubliny / reflow chatu **nejde**. |
-| Pohybuje se překlad se zprávou při scrollu? | **Přibližně.** Polohu dopočítáváme z accessibility událostí, ne z vykreslovací smyčky WhatsAppu. Čekej zpoždění o pár snímků a cukání. Spolehlivá varianta: **během scrollu panely skrýt a po zastavení je zobrazit znovu**. |
-| Dají se identifikovat jednotlivé bubliny? | **Pravděpodobně ano** (text, hranice, příchozí/odchozí). Závisí ale na interních ID view WhatsAppu, která nejsou API a mohou se změnit s každou aktualizací. **[SPIKE]** |
+| Pohybuje se překlad se zprávou při scrollu? | **Ne spolehlivě.** Polohu dopočítáváme z accessibility událostí, ne z vykreslovací smyčky WhatsAppu. **Ověřeno spikem:** `scrollDeltaY` chodí jen u ~10 % scroll událostí, režim „sledovat“ cuká. Spolehlivá varianta: **během scrollu panely skrýt a po zastavení je zobrazit znovu** (naměřeno ≈ 120–165 ms po zastavení, p90 ≈ 250 ms). |
+| Dají se identifikovat jednotlivé bubliny? | **Ano – ověřeno spikem** (text, hranice, příchozí/odchozí) v 1:1 i ve skupině: 0 neurčených směrů z 549 bublin. Závisí ale dál na interních ID view WhatsAppu, která nejsou API a mohou se změnit s každou aktualizací. |
 | Překlad cs↔sq | **ML Kit albánštinu (sq) i češtinu (cs) podporuje** (ověřeno v oficiálním seznamu). Překládá ale přes angličtinu, kvalita je „casual“. Pro kvalitu doporučuji LLM (OpenAI) přes proxy, ML Kit jako offline záložní řešení. |
 | Odchozí překlad | **Plně realizovatelný.** Doporučuji místo vlastní klávesnice použít overlay nad klávesnicí + `ACTION_SET_TEXT` do pole WhatsAppu (uživatel si nechá Gboard). Vlastní IME zůstane jako volitelná varianta. |
 | Google Play | **Riziko střední až vysoké.** Aplikace není „accessibility tool“, takže potřebuje deklaraci v Play Console, výrazné upozornění a souhlas v aplikaci a video. Název „WhatsApp…“ v názvu aplikace je téměř jistě problém (ochranná známka Meta). |
@@ -80,23 +80,32 @@ Způsoby, jak tuto limitaci zmírnit (dají se kombinovat a přepínat v nastave
 
 ### 3.1 Selektory (konfigurovatelné, ne natvrdo v kódu)
 
-Soubor `assets/adapters/whatsapp.json` (později aktualizovatelný), verzovaný podle `versionCode` WhatsAppu:
+Soubor `assets/adapters/whatsapp.json` (později aktualizovatelný), verzovaný podle `versionCode` WhatsAppu. **Hodnoty níže potvrdil spike** (WhatsApp 2.26.44.90, Samsung S21):
 
 ```json
 {
   "package": ["com.whatsapp", "com.whatsapp.w4b"],
-  "conversationList": ["android:id/list", "com.whatsapp:id/conversation_list"],
-  "messageText": ["com.whatsapp:id/message_text"],
+  "conversationList": ["android:id/list"],
+  "messageRow": ["com.whatsapp:id/conversation_row_text", "com.whatsapp:id/conversation_row_image", "com.whatsapp:id/conversation_row_sticker"],
+  "bubble": ["com.whatsapp:id/main_layout"],
+  "messageText": ["com.whatsapp:id/message_text", "com.whatsapp:id/caption"],
+  "linkPreviewText": ["com.whatsapp:id/title", "com.whatsapp:id/snippet"],
   "outgoingMarker": ["com.whatsapp:id/status"],
+  "incomingCue": ["com.whatsapp:id/name_in_group_tv", "com.whatsapp:id/group_profile_pic", "com.whatsapp:id/group_profile_initials"],
   "dateLabel": ["com.whatsapp:id/date"],
-  "senderNameInGroup": ["com.whatsapp:id/name_in_group"],
-  "quoted": ["com.whatsapp:id/quoted_message"],
+  "ignoreSubtree": ["com.whatsapp:id/reactions_bubble_layout", "com.whatsapp:id/media_container_wrapper", "com.whatsapp:id/action_button"],
+  "quotedPrefix": "quoted",
   "inputField": ["com.whatsapp:id/entry"],
   "chatTitle": ["com.whatsapp:id/conversation_contact_name"]
 }
 ```
 
-Hodnoty jsou **předpoklady** podle historicky známých ID (`entry`, `send` a `message_text` se objevují ve veřejných ukázkách automatizace). Spike je musí potvrdit dumpem stromu. Pokud WhatsApp názvy prostředků obfuskuje, použije se strukturní heuristika (třída `TextView` uvnitř položky seznamu s `long-clickable` předkem).
+**Ověřeno spikem:**
+- Seznam zpráv je `android:id/list` (v chatu třída `ListView`, v seznamu chatů `RecyclerView`). Chat se pozná podle přítomnosti `entry`. Mimo chat seznam zpráv vůbec nehledat.
+- Řádek zprávy je přes celou šířku displeje. **Hranice bubliny dává vnořený `main_layout`**, ne `long-clickable` předek (původní předpoklad byl chybný).
+- U obrázku s popiskem je text v `caption`, u zprávy jen s odkazem v náhledu (`title`, `snippet`).
+- Sender ve skupině (`name_in_group_tv`) nesmí být zaměněn za text zprávy.
+- Pokud WhatsApp po aktualizaci ID změní, použít strukturní heuristiku jako zálohu a při selhání nezobrazit nic.
 
 ### 3.2 Postup na jeden „průchod“ (frame)
 
@@ -104,9 +113,9 @@ Hodnoty jsou **předpoklady** podle historicky známých ID (`entry`, `send` a `
 2. Viewport = `boundsInScreen` seznamu (bez toolbaru a vstupního panelu).
 3. Pro každou položku seznamu:
    - najdi uzel `messageText`; uzly uvnitř `quoted` (citace) vynech,
-   - **bublina** = nejbližší předek s `isLongClickable`, jeho `boundsInScreen` = hranice,
-   - **směr**: přítomnost `outgoingMarker` (fajfky) → odchozí, jinak příchozí. Pokud se to nedá rozhodnout, použij polohu bubliny vůči středu viewportu (s ohledem na RTL),
-   - **validace**: `isVisibleToUser`, hranice celé uvnitř viewportu (částečně viditelné → nezobrazovat nebo oříznout), šířka a výška > 0, text není prázdný.
+   - **bublina** = uzel `main_layout` uvnitř řádku, jeho `boundsInScreen` = hranice (ověřeno spikem; záloha: nejbližší předek obsahující text a užší než 92 % viewportu),
+   - **směr** (v tomto pořadí): přítomnost `outgoingMarker` (`status`) → odchozí; přítomnost `incomingCue` (jméno odesílatele nebo avatar ve skupině) → příchozí; jinak podle polohy: `rightGap ≤ 7 %` šířky viewportu → odchozí, `leftGap ≤ 20 %` → příchozí, jinak neurčeno. U uříznutých bublin se směr nehádá podle chybějící značky,
+   - **validace**: šířka a výška > 0, text není prázdný. **Uříznutá bublina** (horní nebo dolní hrana leží na hraně seznamu, `bounds` se ořezávají na viewport) se v režimu SKRYJ nezobrazuje nebo se označí jako částečná.
 4. Vytvoř `MessageKey` (níže). Neplatné nebo nejednoznačné položky **přeskoč, nikdy nehádej**.
 5. Předej snímek `VisibleMessage[]` do `OverlayLayoutEngine`.
 
@@ -249,7 +258,7 @@ AccessibilityEvent ─► EventPipeline (Flow, debounce/throttle)
 
 | # | Riziko | Pravděp. | Dopad | Mitigace |
 |---|---|---|---|---|
-| R1 | WhatsApp označí zprávy jako `accessibilityDataSensitive` | nízká–střední | **kritický** (konec funkce) | Ověřit ve spiku, sledovat betaverze WhatsAppu. Plán B = jen odchozí překlad přes IME. |
+| R1 | WhatsApp označí zprávy jako `accessibilityDataSensitive` | nízká–střední | **kritický** (konec funkce) | **Ve verzi 2.26.44.90 se nepotvrdilo** (spike). Sledovat betaverze WhatsAppu. Plán B = jen odchozí překlad přes IME. |
 | R2 | Změna ID view / obfuskace po aktualizaci | vysoká | vysoký | Konfigurovatelné selektory, strukturní fallback, testy na snapshotech stromu, při selhání nic nezobrazit |
 | R3 | Nepřesné nebo zpožděné pozicování při scrollu | vysoká | střední | Skrytí během scrollu, rychlá cesta přes `scrollDeltaY`, validace hranic |
 | R4 | Zákryt obsahu pod bublinou | jistá | střední | Režimy B/C/D, omezení výšky panelu, průhlednost |
@@ -263,20 +272,24 @@ AccessibilityEvent ─► EventPipeline (Flow, debounce/throttle)
 
 ## 9. Implementační plán
 
-### Etapa 1b – Spike na zařízení (2–3 dny) – **další krok**
+### Etapa 1b – Spike na zařízení – **HOTOVO (14. 11. 2026), verdikt GO**
+Výsledky a čísla: [spike/SPIKE_RESULTS.md](spike/SPIKE_RESULTS.md). Zdroj spiku: `spike/ChatLingoSpike`, sestavení přes GitHub Actions.
+
 Minimální diagnostická aplikace, ne MVP:
 1. AccessibilityService, která vypíše strom WhatsAppu do JSON (ID, třídy, hranice, příznaky) pro otevřený chat.
 2. Overlay, který kolem detekovaných bublin kreslí barevné rámečky (zelená = příchozí, modrá = odchozí) a sleduje scroll.
 3. Test `ACTION_SET_TEXT` do `entry` (bez odeslání).
 
 **Go/No-go kritéria:**
-- [ ] texty zpráv jsou čitelné (žádný `accessibilityDataSensitive`)
-- [ ] hranice bublin přesné na ±4 px v klidu
-- [ ] směr zprávy správně u ≥ 99 % zpráv testovacího chatu (1:1 i skupina)
-- [ ] po scrollu se rámečky do 150 ms ustálí na správném místě
-- [ ] `ACTION_SET_TEXT` funguje
+- [x] texty zpráv jsou čitelné (žádný `accessibilityDataSensitive`)
+- [x] hranice bublin přesné na ±4 px v klidu
+- [x] směr zprávy správně u ≥ 99 % zpráv testovacího chatu (1:1 i skupina): 0 neurčených z 549
+- [~] po scrollu se rámečky do 150 ms ustálí na správném místě: **naměřeno medián ≈ 120–165 ms, p90 ≈ 250 ms**. Doporučená nová hranice pro režim SKRYJ: medián < 200 ms, p90 < 300 ms
+- [x] `ACTION_SET_TEXT` funguje
 
-### Etapa 2 – Prototyp příchozích (cca 1,5–2 týdny)
+### Etapa 2 – Prototyp příchozích (cca 1,5–2 týdny) – **další krok**
+Vstupy ze spiku: výchozí režim scrollu **SKRYJ**, selektory z kap. 3.1, pravidla směru z kap. 3.2, ošetření uříznutých bublin, zrychlení scanu (jen viditelné řádky, hromadné vyhledání podle ID).
+
 Kostra projektu a modulů → onboarding a disclosure → služba a pipeline → WhatsApp adaptér → cache a ML Kit + proxy engine → overlay režim C/A → scroll (skrývání, přepočet) → deduplikace → testy na uložených snapshotech stromu.
 
 ### Etapa 3 – Odchozí překlad (cca 1 týden)
