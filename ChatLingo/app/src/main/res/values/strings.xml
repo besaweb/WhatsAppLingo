@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChatLingo</string>
+    <string name="a11y_label">ChatLingo</string>
+    <string name="a11y_description">Čte text zpráv ve WhatsAppu a zobrazuje pod nimi překlad. Překlad probíhá přímo v telefonu. Služba nikdy neodešle zprávu a nic neposílá na internet.</string>
+</resources>

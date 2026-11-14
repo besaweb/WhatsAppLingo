@@ -287,7 +287,9 @@ Minimální diagnostická aplikace, ne MVP:
 - [~] po scrollu se rámečky do 150 ms ustálí na správném místě: **naměřeno medián ≈ 120–165 ms, p90 ≈ 250 ms**. Doporučená nová hranice pro režim SKRYJ: medián < 200 ms, p90 < 300 ms
 - [x] `ACTION_SET_TEXT` funguje
 
-### Etapa 2 – Prototyp příchozích (cca 1,5–2 týdny) – **další krok**
+### Etapa 2 – Prototyp příchozích (cca 1,5–2 týdny) – **rozpracováno**
+Krok 1 (kostra) je v `ChatLingo/`: jedna aplikace, ML Kit překlad a rozpoznání jazyka v telefonu, adaptér WhatsAppu, overlay, souhlas a nastavení. Zatím bez LLM/proxy, bez Compose a bez rozdělení na moduly. Viz [ChatLingo/README.md](ChatLingo/README.md).
+
 Vstupy ze spiku: výchozí režim scrollu **SKRYJ**, selektory z kap. 3.1, pravidla směru z kap. 3.2, ošetření uříznutých bublin, zrychlení scanu (jen viditelné řádky, hromadné vyhledání podle ID).
 
 Kostra projektu a modulů → onboarding a disclosure → služba a pipeline → WhatsApp adaptér → cache a ML Kit + proxy engine → overlay režim C/A → scroll (skrývání, přepočet) → deduplikace → testy na uložených snapshotech stromu.
