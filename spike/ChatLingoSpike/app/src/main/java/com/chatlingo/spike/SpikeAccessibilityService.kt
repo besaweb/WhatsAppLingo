@@ -184,9 +184,9 @@ class SpikeAccessibilityService : AccessibilityService(), OverlayController.List
     }
 
     companion object {
-        private const val CONTENT_DEBOUNCE_MS = 60L
-        private const val SCROLL_DEBOUNCE_MS = 80L
-        private const val HIDE_IDLE_MS = 150L
+        private const val CONTENT_DEBOUNCE_MS = 40L
+        private const val SCROLL_DEBOUNCE_MS = 40L
+        private const val HIDE_IDLE_MS = 60L
         private const val MAX_WAIT_MS = 250L
         private const val TEST_TEXT = "ChatLingo test ✓ Mirëdita! 👋"
     }

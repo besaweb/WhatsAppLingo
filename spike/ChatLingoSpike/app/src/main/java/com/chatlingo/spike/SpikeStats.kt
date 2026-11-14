@@ -13,6 +13,9 @@ object SpikeStats {
     val settleMs = mutableListOf<Long>()
     var bothKnown = 0
     var bothAgree = 0
+    var dirUnknown = 0
+    var dirTotal = 0
+    @Volatile var markerEverSeen = false
     var lastResult: ScanResult? = null
     var lastSetText: String? = null
     var lastDump: String? = null
@@ -24,6 +27,7 @@ object SpikeStats {
         scrollEvents = 0; scrollWithDelta = 0
         settleMs.clear()
         bothKnown = 0; bothAgree = 0
+        dirUnknown = 0; dirTotal = 0
         lastResult = null; lastSetText = null; lastDump = null
     }
 
@@ -34,6 +38,10 @@ object SpikeStats {
         if (r.durationMs > maxScanMs) maxScanMs = r.durationMs
         lastResult = r
         for (b in r.bubbles) {
+            if (!b.partial) {
+                dirTotal++
+                if (b.direction == Direction.UNKNOWN) dirUnknown++
+            }
             if (b.dirByMarker != Direction.UNKNOWN && b.dirByPosition != Direction.UNKNOWN) {
                 bothKnown++
                 if (b.dirByMarker == b.dirByPosition) bothAgree++
@@ -77,6 +85,7 @@ object SpikeStats {
         appendLine("--- kumulativně ---")
         val agree = if (bothKnown > 0) "%.1f %%".format(bothAgree * 100.0 / bothKnown) else "-"
         appendLine("Shoda směru (fajfky vs. poloha): $agree ze $bothKnown")
+        appendLine("Směr neurčen (bez uříznutých bublin): $dirUnknown ze $dirTotal")
         appendLine("Scroll událostí: $scrollEvents, z toho se scrollDeltaY: $scrollWithDelta")
         val p50 = percentile(0.5); val p90 = percentile(0.9)
         appendLine("Ustálení po scrollu: medián ${p50 ?: "-"} ms, p90 ${p90 ?: "-"} ms, max ${settleMs.maxOrNull() ?: "-"} ms (n=${settleMs.size})")
@@ -94,6 +103,8 @@ object SpikeStats {
         put("settleMs", JSONArray(settleMs))
         put("directionBothKnown", bothKnown)
         put("directionAgree", bothAgree)
+        put("directionUnknown", dirUnknown)
+        put("directionTotalNonPartial", dirTotal)
         put("lastSetText", lastSetText)
         put("mode", mode)
     }

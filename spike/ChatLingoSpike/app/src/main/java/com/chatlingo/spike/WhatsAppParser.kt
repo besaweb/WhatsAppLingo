@@ -54,8 +54,17 @@ fun walk(
 object WhatsAppParser {
     val PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
-    private val TEXT_IDS = setOf("message_text")
+    private val TEXT_IDS = setOf("message_text", "caption")
     private val OUT_MARKER_IDS = setOf("status")
+
+    /** Skupinový chat: jméno odesílatele / kolečko s iniciálou se zobrazují jen u příchozích zpráv. */
+    private val IN_CUE_IDS = setOf("name_in_group", "name_in_group_tv", "group_profile_initials")
+
+    /** Podstromy, které nenesou text zprávy ani značku; nevstupujeme do nich kvůli rychlosti. */
+    private val SKIP_SUBTREE_IDS = setOf(
+        "web_page_preview_holder", "link_preview_frame", "reactions_bubble_layout",
+        "media_container_wrapper", "action_button",
+    )
     private val ENTRY_IDS = listOf("entry")
     private val META_IDS = setOf(
         "date", "status", "name_in_group", "forwarded", "edited",
@@ -80,6 +89,11 @@ object WhatsAppParser {
     }
 
     private fun findConversationList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        // Rychlá cesta: jedno vyhledání podle id místo průchodu celým stromem.
+        val byId = root.findAccessibilityNodeInfosByViewId("android:id/list")
+            .filter { it.isVisibleToUser }
+            .maxByOrNull { val r = it.bounds(); r.width().toLong() * r.height() }
+        if (byId != null) return byId
         var best: AccessibilityNodeInfo? = null
         var bestScore = 0L
         walk(root, maxDepth = 30) { n, _ ->
@@ -103,7 +117,8 @@ object WhatsAppParser {
     fun scan(root: AccessibilityNodeInfo): ScanResult {
         val t0 = SystemClock.uptimeMillis()
         val entry = findEntry(root)
-        val list = findConversationList(root)
+        // Bez vstupního pole nejde o chat; seznam pak vůbec nehledáme (šetří stovky ms na seznamu chatů).
+        val list = if (entry != null) findConversationList(root) else null
         if (entry == null || list == null) {
             return ScanResult(
                 isConversation = false,
@@ -127,11 +142,18 @@ object WhatsAppParser {
             if (parsed.hasMarker) markerSeen = true
             raw += parsed
         }
+        if (markerSeen) SpikeStats.markerEverSeen = true
+        val markerKnown = markerSeen || SpikeStats.markerEverSeen
         val bubbles = raw.map { r ->
+            // Bublina uříznutá o okraj seznamu: horní/dolní hrana leží na hraně seznamu.
+            val partial = !viewport.contains(r.bubbleBounds) ||
+                r.bubbleBounds.top <= viewport.top + 1 || r.bubbleBounds.bottom >= viewport.bottom - 1
             val byMarker = when {
-                !markerSeen -> Direction.UNKNOWN
                 r.hasMarker -> Direction.OUT
-                else -> Direction.IN
+                r.hasInCue -> Direction.IN
+                // Značka odchozích se může skrývat v odříznuté části, proto u částečných bublin nehádáme.
+                markerKnown && !partial -> Direction.IN
+                else -> Direction.UNKNOWN
             }
             val final = if (byMarker != Direction.UNKNOWN) byMarker else r.byPosition
             DetectedBubble(
@@ -143,7 +165,7 @@ object WhatsAppParser {
                 dirByPosition = r.byPosition,
                 textSource = r.textSource,
                 bubbleSource = r.bubbleSource,
-                partial = !viewport.contains(r.bubbleBounds),
+                partial = partial,
             )
         }
         return ScanResult(
@@ -167,6 +189,7 @@ object WhatsAppParser {
         val bubbleSource: String,
         val textSource: String,
         val hasMarker: Boolean,
+        val hasInCue: Boolean,
         val byPosition: Direction,
     )
 
@@ -174,10 +197,15 @@ object WhatsAppParser {
         val byId = mutableListOf<AccessibilityNodeInfo>()
         val candidates = mutableListOf<AccessibilityNodeInfo>()
         var hasMarker = false
+        var hasInCue = false
+        var mainLayout: AccessibilityNodeInfo? = null
         walk(item, maxDepth = 20) { n, _ ->
             val id = n.shortId()
             if (id != null && id.contains("quoted")) return@walk false
+            if (id != null && id in SKIP_SUBTREE_IDS) return@walk false
+            if (id == "main_layout" && mainLayout == null) mainLayout = n
             if (id != null && id in OUT_MARKER_IDS) hasMarker = true
+            if (id != null && id in IN_CUE_IDS) hasInCue = true
             val txt = n.text
             if (!txt.isNullOrBlank()) {
                 if (id != null && id in TEXT_IDS) {
@@ -198,7 +226,15 @@ object WhatsAppParser {
 
         var bubble = Rect(textBounds)
         var bubbleSource = "text"
-        var cur = textNode.parent
+        // Rychlá cesta: main_layout je přesná bublina (bez dalších volání nadřazených uzlů).
+        val ml = mainLayout?.bounds()
+        var cur = if (ml != null && ml.contains(textBounds) && ml.width() <= viewport.width() * 0.92f) {
+            bubble = ml
+            bubbleSource = "main_layout"
+            null
+        } else {
+            textNode.parent
+        }
         var steps = 0
         while (cur != null && steps < 8) {
             val r = cur.bounds()
@@ -226,6 +262,7 @@ object WhatsAppParser {
             bubbleSource = bubbleSource,
             textSource = source,
             hasMarker = hasMarker,
+            hasInCue = hasInCue,
             byPosition = byPosition,
         )
     }
