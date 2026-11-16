@@ -96,13 +96,16 @@ class WhatsAppAdapter {
         return ExtractionResult(true, viewport, messages)
     }
 
-    private fun hasVisibleEntry(root: AccessibilityNodeInfo): Boolean {
+    private fun hasVisibleEntry(root: AccessibilityNodeInfo): Boolean = findEntry(root) != null
+
+    /** Vstupní pole zprávy (jen viditelné a ne heslo). Služba do něj smí jen vložit text, nikdy neodesílá. */
+    fun findEntry(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         val pkgs = (listOfNotNull(root.packageName?.toString()) + WhatsAppSelectors.PACKAGES).distinct()
         for (pkg in pkgs) {
             val found = root.findAccessibilityNodeInfosByViewId("$pkg:id/${WhatsAppSelectors.ENTRY}")
-            if (found.any { it.isVisibleToUser }) return true
+            found.firstOrNull { it.isVisibleToUser && !it.isPassword }?.let { return it }
         }
-        return false
+        return null
     }
 
     private fun findList(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =

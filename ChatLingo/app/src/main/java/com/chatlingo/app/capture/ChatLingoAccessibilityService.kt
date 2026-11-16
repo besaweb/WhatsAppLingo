@@ -3,6 +3,7 @@ package com.chatlingo.app.capture
 import android.accessibilityservice.AccessibilityService
 import android.content.SharedPreferences
 import android.graphics.Rect
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -15,9 +16,11 @@ import com.chatlingo.app.adapter.WhatsAppSelectors
 import com.chatlingo.app.model.Direction
 import com.chatlingo.app.model.ExtractionResult
 import com.chatlingo.app.model.LanguagePair
+import com.chatlingo.app.overlay.OutgoingPanel
 import com.chatlingo.app.overlay.Panel
 import com.chatlingo.app.overlay.TranslationOverlay
 import com.chatlingo.app.translation.AppGraph
+import com.chatlingo.app.translation.TranslationEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -40,6 +43,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
 
     private lateinit var settings: AppSettings
     private lateinit var overlay: TranslationOverlay
+    private lateinit var outgoingPanel: OutgoingPanel
     private var prefsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     private var lastResult: ExtractionResult? = null
@@ -47,10 +51,16 @@ class ChatLingoAccessibilityService : AccessibilityService() {
     private var lastScrollAt = 0L
     private val scanRunnable = Runnable { scan() }
 
+    // Odchozí překlad (psaná zpráva)
+    private var outgoingTranslation: String? = null
+    private var lastInserted: String? = null
+    private val outgoingRunnable = Runnable { scanOutgoing() }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         settings = AppSettings(this)
         overlay = TranslationOverlay(this)
+        outgoingPanel = OutgoingPanel(this, onInsert = { insertTranslation() }, onClose = { dismissOutgoing() })
         // Změna nastavení (jazyky, režim, pozastavení) se projeví hned, ne až po další události.
         prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> schedule(0) }
             .also { settings.prefs.registerOnSharedPreferenceChangeListener(it) }
@@ -61,6 +71,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         scope.cancel()
         if (::settings.isInitialized) prefsListener?.let { settings.prefs.unregisterOnSharedPreferenceChangeListener(it) }
         if (::overlay.isInitialized) overlay.detach()
+        if (::outgoingPanel.isInitialized) outgoingPanel.detach()
         super.onDestroy()
     }
 
@@ -77,6 +88,11 @@ class ChatLingoAccessibilityService : AccessibilityService() {
                 schedule(SCROLL_IDLE_MS)
             }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> if (fromWhatsApp) schedule(CONTENT_DEBOUNCE_MS)
+            // Psaní do pole zprávy: překlad až po pauze v psaní (šetří výkon i soukromí).
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> if (fromWhatsApp) {
+                main.removeCallbacks(outgoingRunnable)
+                main.postDelayed(outgoingRunnable, OUTGOING_DEBOUNCE_MS)
+            }
             // Změna oken (klávesnice, jiná aplikace, oznamovací lišta): přepočítat nebo skrýt.
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> if (pkg != packageName) schedule(CONTENT_DEBOUNCE_MS)
@@ -116,6 +132,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         lastScanAt = SystemClock.uptimeMillis()
         if (!settings.consent || !settings.enabled) {
             overlay.clear()
+            dismissOutgoing()
             return
         }
         val root = findWhatsAppRoot()
@@ -123,6 +140,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         if (result == null || !result.isConversation) {
             lastResult = null
             overlay.clear()
+            dismissOutgoing()
             return
         }
         overlay.ensureAttached()
@@ -138,17 +156,18 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         }
         if (settings.mode == AppSettings.MODE_LATEST) candidates = candidates.takeLast(1)
 
+        val (preferred, engine) = AppGraph.engineFor(settings)
         val panels = ArrayList<Panel>()
         for (m in candidates) {
-            val translated = repo.cached(pair, m.text)
-            if (translated != null) panels += Panel(m.bounds, translated) else request(pair, m.text)
+            val translated = repo.cached(preferred, pair, m.text)
+            if (translated != null) panels += Panel(m.bounds, translated) else request(preferred, engine, pair, m.text)
         }
         overlay.show(panels, result.viewport)
     }
 
-    private fun request(pair: LanguagePair, text: String) {
+    private fun request(preferred: String, engine: TranslationEngine, pair: LanguagePair, text: String) {
         scope.launch {
-            val added = repo.translate(pair, text)
+            val added = repo.translate(preferred, engine, pair, text)
             // Po dokončení překladu překreslit, ale ne uprostřed scrollu (tam se panely stejně skrývají).
             if (added && SystemClock.uptimeMillis() - lastScrollAt > SCROLL_IDLE_MS) {
                 lastResult?.let { render(it) }
@@ -156,7 +175,65 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         }
     }
 
+    // ---- Odchozí překlad: text, který uživatel píše ----
+
+    private fun dismissOutgoing() {
+        main.removeCallbacks(outgoingRunnable)
+        outgoingTranslation = null
+        if (::outgoingPanel.isInitialized) outgoingPanel.hide()
+    }
+
+    private fun scanOutgoing() {
+        if (!settings.consent || !settings.enabled || !settings.outgoing) {
+            dismissOutgoing()
+            return
+        }
+        val root = findWhatsAppRoot() ?: return dismissOutgoing()
+        val entry = adapter.findEntry(root) ?: return dismissOutgoing()
+        val text = entry.text?.toString().orEmpty()
+        // Prázdné pole ukazuje nápovědu („Zpráva“), ta se nepřekládá. Text, který jsme sami vložili, také ne.
+        if (entry.isShowingHintText || text.isBlank() || text == lastInserted) return dismissOutgoing()
+
+        // Píšu ve svém jazyce (cíl příchozích) a překládám do jazyka příchozích: opačný směr než u příchozích.
+        val pair = LanguagePair(settings.target, settings.source)
+        val (preferred, engine) = AppGraph.engineFor(settings)
+        val bounds = Rect().also { entry.getBoundsInScreen(it) }
+
+        val cached = repo.cached(preferred, pair, text)
+        if (cached != null) {
+            showOutgoing(cached, pair, bounds)
+            return
+        }
+        scope.launch {
+            repo.translate(preferred, engine, pair, text)
+            // Zobrazit jen když se mezitím text v poli nezměnil.
+            val current = findWhatsAppRoot()?.let { adapter.findEntry(it) }?.text?.toString().orEmpty()
+            if (current == text) {
+                repo.cached(preferred, pair, text)?.let { showOutgoing(it, pair, bounds) } ?: dismissOutgoing()
+            }
+        }
+    }
+
+    private fun showOutgoing(translation: String, pair: LanguagePair, entryBounds: Rect) {
+        outgoingTranslation = translation
+        outgoingPanel.show(translation, "Překlad ${pair.source} → ${pair.target}", entryBounds)
+    }
+
+    /** Vloží překlad do pole zprávy. Nikdy zprávu neodešle, odeslat musí uživatel sám. */
+    private fun insertTranslation() {
+        val translation = outgoingTranslation ?: return
+        val entry = findWhatsAppRoot()?.let { adapter.findEntry(it) } ?: return
+        val args = Bundle().apply {
+            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, translation)
+        }
+        if (entry.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            lastInserted = translation
+            dismissOutgoing()
+        }
+    }
+
     private companion object {
+        const val OUTGOING_DEBOUNCE_MS = 700L
         const val CONTENT_DEBOUNCE_MS = 40L
         const val SCROLL_IDLE_MS = 60L
         const val MAX_WAIT_MS = 250L

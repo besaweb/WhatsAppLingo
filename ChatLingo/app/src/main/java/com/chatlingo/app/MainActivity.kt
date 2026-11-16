@@ -7,18 +7,25 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
 import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import com.chatlingo.app.capture.ChatLingoAccessibilityService
+import com.chatlingo.app.model.LanguagePair
 import com.chatlingo.app.translation.AppGraph
+import com.chatlingo.app.translation.RemoteEngine
+import com.chatlingo.app.translation.TranslationResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +39,7 @@ class MainActivity : Activity() {
     private lateinit var settings: AppSettings
     private lateinit var serviceStatus: TextView
     private lateinit var modelStatus: TextView
+    private lateinit var proxyStatus: TextView
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
@@ -93,6 +101,13 @@ class MainActivity : Activity() {
         col.addView(label("Překládat do"), lp())
         col.addView(languageSpinner(settings.target) { settings.target = it }, lp())
 
+        col.addView(Switch(this).apply {
+            text = "Překládat i zprávu, kterou píšu"
+            isChecked = settings.outgoing
+            setOnCheckedChangeListener { _, checked -> settings.outgoing = checked }
+        }, lp())
+        col.addView(label("Při psaní se nad polem objeví překlad (z „Překládat do“ do „Jazyk příchozích zpráv“). Do pole se vloží až po klepnutí na Vložit překlad, odeslat musíš sám."), lp())
+
         col.addView(label("Zobrazení překladu"), lp())
         col.addView(modeSpinner(), lp())
 
@@ -102,6 +117,32 @@ class MainActivity : Activity() {
         }, lp())
         modelStatus = TextView(this).apply { textSize = 13f }
         col.addView(modelStatus, lp())
+
+        // Kvalitnější překlad přes LLM na vlastní proxy. Vypnuto = nic neopouští telefon.
+        col.addView(label("Kvalitní překlad (volitelné)"), lp())
+        col.addView(Switch(this).apply {
+            text = "Překlad přes LLM (texty se pošlou na tvou proxy)"
+            isChecked = settings.useLlm
+            setOnCheckedChangeListener { _, checked -> settings.useLlm = checked }
+        }, lp())
+        col.addView(EditText(this).apply {
+            hint = "Adresa proxy (https://…)"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            setText(settings.proxyUrl)
+            addTextChangedListener(onChange { settings.proxyUrl = it })
+        }, lp())
+        col.addView(EditText(this).apply {
+            hint = "Token"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setText(settings.proxyToken)
+            addTextChangedListener(onChange { settings.proxyToken = it })
+        }, lp())
+        col.addView(Button(this).apply {
+            text = "Otestovat spojení"
+            setOnClickListener { testProxy() }
+        }, lp())
+        proxyStatus = TextView(this).apply { textSize = 13f }
+        col.addView(proxyStatus, lp())
 
         col.addView(TextView(this).apply {
             textSize = 13f
@@ -168,6 +209,28 @@ class MainActivity : Activity() {
         return "$name ($code)"
     }
 
+    private fun onChange(block: (String) -> Unit) = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+        override fun afterTextChanged(s: Editable?) = block(s?.toString().orEmpty())
+    }
+
+    private fun testProxy() {
+        val url = settings.proxyUrl.trim()
+        if (url.isEmpty()) {
+            proxyStatus.text = "Vyplň adresu proxy."
+            return
+        }
+        proxyStatus.text = "Zkouším spojení …"
+        scope.launch {
+            val r = RemoteEngine(url, settings.proxyToken.trim()).translate("Dobrý den, jak se máte?", LanguagePair("cs", "en"))
+            proxyStatus.text = when (r) {
+                is TranslationResult.Success -> "✅ Funguje. Ukázka: ${r.text}"
+                is TranslationResult.Failure -> "❌ Selhalo (${r.reason}). Zkontroluj adresu a token."
+            }
+        }
+    }
+
     private fun downloadModels() {
         val pair = settings.pair
         if (pair.source == pair.target) {
@@ -176,7 +239,7 @@ class MainActivity : Activity() {
         }
         modelStatus.text = "Stahuji modely ${pair.source} → ${pair.target} …"
         scope.launch {
-            val ok = AppGraph.engine.ensureModel(pair)
+            val ok = AppGraph.mlKit.ensureModel(pair)
             modelStatus.text = if (ok) "✅ Modely jsou připravené." else "❌ Stažení selhalo (zkontroluj internet)."
         }
     }
@@ -194,9 +257,12 @@ class MainActivity : Activity() {
 
         const val DISCLOSURE = """Co ChatLingo dělá: zapnutá služba přístupnosti čte text zpráv, které vidíš ve WhatsAppu, a pod příchozími zprávami zobrazuje překlad. Čtou se jen zprávy na obrazovce.
 
-Kam data jdou: překlad probíhá přímo v telefonu. Texty zpráv se nikam neodesílají a neukládají na disk. Internet se používá jen ke stažení jazykových modelů.
+Kam data jdou: ve výchozím stavu překlad probíhá přímo v telefonu. Texty zpráv se nikam neodesílají a neukládají na disk. Internet se používá jen ke stažení jazykových modelů.
+Pokud zapneš „Překlad přes LLM“, text překládaných příchozích zpráv se pošle na tvou proxy a odtud poskytovateli překladu (Google Gemini). Zapínej jen s tím, že s tím souhlasíš.
 
-Co ChatLingo nedělá: nikdy neodešle zprávu, nic neklikne a nic ve WhatsAppu nemění."""
+Psaná zpráva: pokud je zapnutý překlad psané zprávy, služba čte text, který píšeš do pole zprávy, a po pauze v psaní ho přeloží. Do pole ho vloží jen po tvém klepnutí na „Vložit překlad“.
+
+Co ChatLingo nedělá: nikdy neodešle zprávu, nic neklikne na tlačítko Odeslat a nic ve WhatsAppu jinak nemění."""
 
         const val HINTS = """Postup: 1) souhlas, 2) zapni službu v nastavení přístupnosti (u instalace mimo obchod nejdřív „Povolit omezená nastavení“), 3) stáhni modely, 4) otevři chat ve WhatsAppu. Překlad se zobrazí pod příchozí zprávou po zastavení scrollu."""
     }

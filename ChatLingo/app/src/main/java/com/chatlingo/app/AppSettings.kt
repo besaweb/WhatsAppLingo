@@ -30,6 +30,24 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_MODE, MODE_LATEST) ?: MODE_LATEST
         set(v) = prefs.edit().putString(KEY_MODE, v).apply()
 
+    /** Překlad zprávy, kterou uživatel píše (z jeho jazyka do jazyka příchozích). Vkládá se jen po klepnutí na Vložit. */
+    var outgoing: Boolean
+        get() = prefs.getBoolean(KEY_OUTGOING, true)
+        set(v) = prefs.edit().putBoolean(KEY_OUTGOING, v).apply()
+
+    /** Kvalitní překlad přes LLM (text zprávy se posílá na vlastní proxy). Vypnuto = vše zůstává v telefonu. */
+    var useLlm: Boolean
+        get() = prefs.getBoolean(KEY_USE_LLM, false)
+        set(v) = prefs.edit().putBoolean(KEY_USE_LLM, v).apply()
+
+    var proxyUrl: String
+        get() = prefs.getString(KEY_PROXY_URL, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_PROXY_URL, v).apply()
+
+    var proxyToken: String
+        get() = prefs.getString(KEY_PROXY_TOKEN, "") ?: ""
+        set(v) = prefs.edit().putString(KEY_PROXY_TOKEN, v).apply()
+
     val pair: LanguagePair get() = LanguagePair(source, target)
 
     companion object {
@@ -39,6 +57,10 @@ class AppSettings(context: Context) {
         const val KEY_SOURCE = "source"
         const val KEY_TARGET = "target"
         const val KEY_MODE = "mode"
+        const val KEY_OUTGOING = "outgoing"
+        const val KEY_USE_LLM = "use_llm"
+        const val KEY_PROXY_URL = "proxy_url"
+        const val KEY_PROXY_TOKEN = "proxy_token"
         const val MODE_LATEST = "C"
         const val MODE_ALL = "A"
     }

@@ -12,7 +12,7 @@ import kotlinx.coroutines.tasks.await
 
 /** Překlad v telefonu (ML Kit). Modely se stahují jednou, text zpráv opouští aplikaci nikdy. */
 class MlKitEngine : TranslationEngine {
-    override val id = "mlkit"
+    override val id = ID
 
     private val translators = HashMap<String, Translator>()
     private val ready = HashSet<String>()
@@ -51,22 +51,40 @@ class MlKitEngine : TranslationEngine {
             TranslationResult.Failure(e.javaClass.simpleName)
         }
     }
+
+    companion object {
+        const val ID = "mlkit"
+    }
 }
 
-/** Rozpoznání jazyka v telefonu. Slouží k tomu, aby se nepřekládaly zprávy, které už jsou v cílovém jazyce. */
+/**
+ * Rozpoznání jazyka v telefonu. Rozhoduje, jestli se zpráva má překládat, aby se nepřekládaly
+ * zprávy, které už jsou v cílovém (nebo jiném než zdrojovém) jazyce.
+ */
 class LanguageGate {
     private val client by lazy {
         LanguageIdentification.getClient(
-            LanguageIdentificationOptions.Builder().setConfidenceThreshold(0.5f).build(),
+            LanguageIdentificationOptions.Builder().setConfidenceThreshold(0.1f).build(),
         )
     }
 
-    /** Kód jazyka, nebo "und" když se nedá určit. */
-    suspend fun detect(text: String): String = try {
-        client.identifyLanguage(text).await()
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        "und"
+    suspend fun shouldTranslate(text: String, source: String, target: String): Boolean {
+        val candidates = try {
+            client.identifyPossibleLanguages(text).await()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return true // rozpoznání selhalo, raději přeložit
+        }
+        val top = candidates.maxByOrNull { it.confidence }
+        val sourceConf = candidates.firstOrNull { it.languageTag == source }?.confidence ?: 0f
+        val targetConf = candidates.firstOrNull { it.languageTag == target }?.confidence ?: 0f
+        return when {
+            top == null || top.languageTag == "und" -> sourceConf > targetConf && sourceConf > 0f
+            top.languageTag == target -> false
+            top.languageTag == source -> true
+            // Jiný jazyk (např. slovenština u české zprávy): překládat jen když je zdroj pravděpodobnější než cíl.
+            else -> sourceConf > targetConf
+        }
     }
 }

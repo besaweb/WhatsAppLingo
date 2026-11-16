@@ -12,8 +12,21 @@ pravidla směru, skrytí panelů během scrollu.
 - Souhlas uživatele před použitím, hlavní přepínač „Překlady zapnuté“.
 - Nikdy neklikne na Odeslat a nic ve WhatsAppu nemění.
 
+## Překlad psané zprávy (odchozí)
+Při psaní do pole zprávy se po pauze 0,7 s zobrazí nad polem panel s překladem
+(z „Překládat do“ do „Jazyk příchozích zpráv“, např. čeština → albánština). Tlačítko
+**Vložit překlad** vloží text do pole (`ACTION_SET_TEXT`), **Zavřít** panel skryje.
+Zprávu vždy odesílá uživatel sám, služba na Odeslat nikdy neklikne.
+
+## Kvalitnější překlad přes LLM (volitelné)
+ML Kit překládá cs↔sq přes angličtinu, takže gramatika není ideální. V aplikaci jde zapnout
+**Překlad přes LLM**: text příchozí zprávy se pošle na tvou vlastní proxy
+(`../backend/proxy`, Cloudflare Worker + Gemini) a vrátí se překlad. Když proxy selže,
+použije se automaticky ML Kit. Postup nasazení proxy: `../backend/proxy/README.md`.
+Texty zpráv v tomto režimu opouštějí telefon (je uvedeno v souhlasu).
+
 ## Co zatím neumí (další kroky)
-- Odchozí překlad (Etapa 3), překlad přes LLM/proxy, ochrana URL a čísel před překladem.
+- Odchozí překlad (Etapa 3), ochrana URL a čísel před překladem.
 - Konfigurace selektorů v JSON, oddělené Gradle moduly, Compose UI (zatím jedna aplikace s běžnými view).
 - Úprava polohy panelu tak, aby nezakrýval další zprávu.
 

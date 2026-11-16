@@ -1,0 +1,11 @@
+name = "chatlingo-proxy"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# Tajné hodnoty se nastavují příkazem `wrangler secret put` (viz README), ne v tomto souboru:
+#   GEMINI_API_KEY  klíč z Google AI Studio
+#   APP_TOKEN       vlastní dlouhý náhodný řetězec, stejný zadáš v aplikaci
+
+[vars]
+# Model Gemini. Pokud nebude dostupný, změň na jiný (ověř na https://ai.google.dev/gemini-api/docs/models).
+MODEL = "gemini-2.5-flash"
