@@ -10,12 +10,14 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import android.widget.Toast
 import com.chatlingo.app.AppSettings
 import com.chatlingo.app.adapter.WhatsAppAdapter
 import com.chatlingo.app.adapter.WhatsAppSelectors
 import com.chatlingo.app.model.Direction
 import com.chatlingo.app.model.ExtractionResult
 import com.chatlingo.app.model.LanguagePair
+import com.chatlingo.app.overlay.FloatingToggle
 import com.chatlingo.app.overlay.OutgoingPanel
 import com.chatlingo.app.overlay.Panel
 import com.chatlingo.app.overlay.TranslationOverlay
@@ -44,6 +46,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
     private lateinit var settings: AppSettings
     private lateinit var overlay: TranslationOverlay
     private lateinit var outgoingPanel: OutgoingPanel
+    private lateinit var toggle: FloatingToggle
     private var prefsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
 
     private var lastResult: ExtractionResult? = null
@@ -61,6 +64,11 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         settings = AppSettings(this)
         overlay = TranslationOverlay(this)
         outgoingPanel = OutgoingPanel(this, onInsert = { insertTranslation() }, onClose = { dismissOutgoing() })
+        toggle = FloatingToggle(this, settings) {
+            val on = !settings.enabled
+            settings.enabled = on // změna nastavení spustí nový průchod (prefsListener)
+            Toast.makeText(this, if (on) "ChatLingo: překlad zapnutý" else "ChatLingo: překlad vypnutý", Toast.LENGTH_SHORT).show()
+        }
         // Změna nastavení (jazyky, režim, pozastavení) se projeví hned, ne až po další události.
         prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> schedule(0) }
             .also { settings.prefs.registerOnSharedPreferenceChangeListener(it) }
@@ -72,6 +80,7 @@ class ChatLingoAccessibilityService : AccessibilityService() {
         if (::settings.isInitialized) prefsListener?.let { settings.prefs.unregisterOnSharedPreferenceChangeListener(it) }
         if (::overlay.isInitialized) overlay.detach()
         if (::outgoingPanel.isInitialized) outgoingPanel.detach()
+        if (::toggle.isInitialized) toggle.detach()
         super.onDestroy()
     }
 
@@ -130,13 +139,30 @@ class ChatLingoAccessibilityService : AccessibilityService() {
 
     private fun scan() {
         lastScanAt = SystemClock.uptimeMillis()
-        if (!settings.consent || !settings.enabled) {
+        if (!settings.consent) {
+            overlay.clear()
+            dismissOutgoing()
+            toggle.hide()
+            return
+        }
+        val root = findWhatsAppRoot()
+        if (root == null) {
+            // WhatsApp není v popředí: nic nezobrazovat, ani plovoucí tlačítko.
+            lastResult = null
+            overlay.clear()
+            dismissOutgoing()
+            toggle.hide()
+            return
+        }
+        // Plovoucí tlačítko je vidět nad WhatsAppem i při vypnutém překladu, aby šel znovu zapnout.
+        if (settings.showToggle) toggle.show(settings.enabled) else toggle.hide()
+        if (!settings.enabled) {
+            lastResult = null
             overlay.clear()
             dismissOutgoing()
             return
         }
-        val root = findWhatsAppRoot()
-        val result = root?.let { runCatching { adapter.extract(it) }.getOrNull() }
+        val result = runCatching { adapter.extract(root) }.getOrNull()
         if (result == null || !result.isConversation) {
             lastResult = null
             overlay.clear()

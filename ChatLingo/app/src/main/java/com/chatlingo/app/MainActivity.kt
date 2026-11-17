@@ -102,6 +102,13 @@ class MainActivity : Activity() {
         col.addView(languageSpinner(settings.target) { settings.target = it }, lp())
 
         col.addView(Switch(this).apply {
+            text = "Plovoucí tlačítko ve WhatsAppu"
+            isChecked = settings.showToggle
+            setOnCheckedChangeListener { _, checked -> settings.showToggle = checked }
+        }, lp())
+        col.addView(label("Tlačítko „CL“ se zobrazí jen nad WhatsAppem. Klepnutím vypneš nebo zapneš překlad (zelené = zapnuto, šedé = vypnuto), tažením ho přesuneš."), lp())
+
+        col.addView(Switch(this).apply {
             text = "Překládat i zprávu, kterou píšu"
             isChecked = settings.outgoing
             setOnCheckedChangeListener { _, checked -> settings.outgoing = checked }

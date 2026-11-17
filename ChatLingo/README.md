@@ -12,6 +12,12 @@ pravidla směru, skrytí panelů během scrollu.
 - Souhlas uživatele před použitím, hlavní přepínač „Překlady zapnuté“.
 - Nikdy neklikne na Odeslat a nic ve WhatsAppu nemění.
 
+## Plovoucí tlačítko
+Nad WhatsAppem se zobrazuje kulaté tlačítko **CL** (jinde ne). Klepnutí zapne nebo vypne
+automatický překlad příchozích i psaných zpráv (zelené = zapnuto, šedé přeškrtnuté = vypnuto).
+Tažením se přesune, po puštění se přichytí k okraji a poloha se pamatuje.
+Tlačítko jde skrýt v nastavení aplikace.
+
 ## Překlad psané zprávy (odchozí)
 Při psaní do pole zprávy se po pauze 0,7 s zobrazí nad polem panel s překladem
 (z „Překládat do“ do „Jazyk příchozích zpráv“, např. čeština → albánština). Tlačítko

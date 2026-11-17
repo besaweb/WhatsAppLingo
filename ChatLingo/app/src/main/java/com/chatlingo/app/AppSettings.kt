@@ -30,6 +30,20 @@ class AppSettings(context: Context) {
         get() = prefs.getString(KEY_MODE, MODE_LATEST) ?: MODE_LATEST
         set(v) = prefs.edit().putString(KEY_MODE, v).apply()
 
+    /** Plovoucí tlačítko ve WhatsAppu pro rychlé zapnutí a vypnutí překladu. */
+    var showToggle: Boolean
+        get() = prefs.getBoolean(KEY_SHOW_TOGGLE, true)
+        set(v) = prefs.edit().putBoolean(KEY_SHOW_TOGGLE, v).apply()
+
+    /** Poloha plovoucího tlačítka v pixelech (-1 = výchozí). */
+    var toggleX: Int
+        get() = prefs.getInt(KEY_TOGGLE_X, -1)
+        set(v) = prefs.edit().putInt(KEY_TOGGLE_X, v).apply()
+
+    var toggleY: Int
+        get() = prefs.getInt(KEY_TOGGLE_Y, -1)
+        set(v) = prefs.edit().putInt(KEY_TOGGLE_Y, v).apply()
+
     /** Překlad zprávy, kterou uživatel píše (z jeho jazyka do jazyka příchozích). Vkládá se jen po klepnutí na Vložit. */
     var outgoing: Boolean
         get() = prefs.getBoolean(KEY_OUTGOING, true)
@@ -58,6 +72,9 @@ class AppSettings(context: Context) {
         const val KEY_TARGET = "target"
         const val KEY_MODE = "mode"
         const val KEY_OUTGOING = "outgoing"
+        const val KEY_SHOW_TOGGLE = "show_toggle"
+        const val KEY_TOGGLE_X = "toggle_x"
+        const val KEY_TOGGLE_Y = "toggle_y"
         const val KEY_USE_LLM = "use_llm"
         const val KEY_PROXY_URL = "proxy_url"
         const val KEY_PROXY_TOKEN = "proxy_token"
